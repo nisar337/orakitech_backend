@@ -1,12 +1,52 @@
-const express = require("express");
-const Listing = require("./models/listing");
-const mongoose = require("mongoose");
-const app = express();
-const CORS = require("cors");
+import "dotenv/config";
+import dns from "node:dns";
 
-// Middlewares
+// Windows + Node often fail querySrv (ECONNREFUSED) for mongodb+srv when the
+// system's first DNS server refuses SRV lookups. Prefer explicit resolvers.
+const fromEnv = process.env.DNS_SERVERS?.split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const dnsServers =
+  fromEnv?.length > 0
+    ? fromEnv
+    : process.platform === "win32"
+      ? ["8.8.8.8", "8.8.4.4"]
+      : null;
+if (dnsServers?.length) {
+  dns.setServers(dnsServers);
+}
+
+import express from "express";
+import mongoose from "mongoose";
+import homeRoute from "./Routing/homeRoute.js";
+import listingRoute from "./Routing/listingRoute.js";
+import orderRoute from "./Routing/orderRoute.js";
+import authRoute from "./Routing/authRoute.js";
+import engagementRoute from "./Routing/engagementRoute.js";
+
+const app = express();
+import cors from "cors";
+
+const PORT = process.env.PORT || 3002;
+const dbUrl = process.env.ATLASDB_URL;
+
+/** Comma-separated origins for browser requests (Vercel preview + production). */
+const corsOrigins = process.env.FRONTEND_ORIGIN
+  ? process.env.FRONTEND_ORIGIN.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : null;
+
 app.use(express.json());
-app.use(CORS());
+app.use(
+  cors({
+    origin:
+      corsOrigins && corsOrigins.length > 0 ? corsOrigins : true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 
 main()
   .then(() => {
@@ -16,36 +56,36 @@ main()
     console.log("Error connecting to DB", err);
   });
 
-// Database Cononection function
 async function main() {
-  await mongoose.connect("mongodb://localhost:27017/Orakitech");
+  await mongoose.connect(dbUrl);
 }
 
-// Get Request for Query Item
-app.get("/api/home/:queryParams", async (req, res, next) => {
-  const { queryParams } = req.params;
-  const result = await Listing.findOne({ slug: queryParams });
-  if (!result) {
-    return res.status(500).json({ message: "Result not found!" });
-  }
-  res.send(result);
-});
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "orakitech-api" });
+}); 
 
-// Get Request for Home Route 
-app.get("/api/home", async (req, res, next) => {
-  const laptopData = await Listing.find();
-  if (!laptopData) {
-    return res.status(500).json({ message: "Data not found!" });
-  }
-  res.send(laptopData);
-});
 
-// Error handling Middleware
+app.use("/api/auth", authRoute);
+app.use("/api/home", homeRoute);
+app.use("/api/listings", listingRoute);
+app.use("/api/orders", orderRoute);
+app.use("/api/engagement", engagementRoute);
+
+
 app.use((err, req, res, next) => {
-  const { status = 500, message = "Page not found!" } = err;
+  const status = err.status || 500;
+  const message = err.message || "Server error";
   res.status(status).json({ message });
 });
 
-app.listen(3002, () => {
+app.listen(PORT, () => {
   console.log("Server Listening");
+  if (
+    !process.env.ADMIN_JWT_SECRET ||
+    String(process.env.ADMIN_JWT_SECRET).length < 16
+  ) {
+    console.warn(
+      "[admin] Set ADMIN_JWT_SECRET (16+ chars) in .env. Create the first admin via POST /api/auth/admin/setup or the dashboard setup form."
+    );
+  }
 });
