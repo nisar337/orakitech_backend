@@ -82,5 +82,7 @@ const listingSchema = new Schema(
   { timestamps: true }
 );
 
+listingSchema.index({ createdAt: -1 });
+
 const Listing = model("Listing", listingSchema);
 export default Listing;
