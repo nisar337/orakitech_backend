@@ -216,12 +216,12 @@ router.post(
   }
 );
 
-/** List admins (no passwords) — requires signed-in admin */
+  /** List admins (no passwords) — requires signed-in admin */
 router.get("/admin/users", requireAdmin, async (_req, res, next) => {
   try {
     await ensurePrimaryAdmin();
     const admins = await Admin.find({})
-      .select("username fullName email active createdAt isPrimary")
+      .select("username fullName email active createdAt isPrimary avatarUrl")
       .sort({ createdAt: 1 })
       .lean();
     res.json({ admins });
