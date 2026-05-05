@@ -2,10 +2,17 @@ import { Router } from "express";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import multer from "multer";
 import Admin from "../models/admin.js";
 import { requireAdmin } from "../middleware/requireAdmin.js";
+import { storage } from "../cloudConfig.js";
 
 const router = Router();
+
+const uploadAvatar = multer({
+  storage,
+  limits: { fileSize: 4 * 1024 * 1024, files: 1 },
+});
 
 function jwtSecret() {
   const secret = process.env.ADMIN_JWT_SECRET;
@@ -132,6 +139,8 @@ router.post("/admin/login", async (req, res, next) => {
         username: admin.username,
         fullName: admin.fullName || "",
         email: admin.email || "",
+        avatarUrl: admin.avatarUrl || "",
+        isPrimary: Boolean(admin.isPrimary),
       },
     });
   } catch (err) {
@@ -144,7 +153,7 @@ router.get("/admin/me", requireAdmin, async (req, res, next) => {
     const admin = await Admin.findOne({
       username: req.admin.sub,
       active: true,
-    }).select("username fullName email");
+    }).select("username fullName email avatarUrl isPrimary");
     if (!admin) {
       return res.status(401).json({ message: "Admin no longer exists or is inactive." });
     }
@@ -153,12 +162,59 @@ router.get("/admin/me", requireAdmin, async (req, res, next) => {
         username: admin.username,
         fullName: admin.fullName || "",
         email: admin.email || "",
+        avatarUrl: admin.avatarUrl || "",
+        role: admin.isPrimary ? "Primary Admin" : "Admin",
+        isPrimary: Boolean(admin.isPrimary),
       },
     });
   } catch (err) {
     next(err);
   }
 });
+
+router.post(
+  "/admin/me/avatar",
+  requireAdmin,
+  (req, res, next) => {
+    uploadAvatar.single("avatar")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          message: err?.message || "Could not upload avatar.",
+        });
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const fileUrl = req.file?.path || "";
+      if (!fileUrl) {
+        return res.status(400).json({ message: "No file uploaded." });
+      }
+      const admin = await Admin.findOneAndUpdate(
+        { username: req.admin.sub, active: true },
+        { $set: { avatarUrl: fileUrl } },
+        { new: true }
+      ).select("username fullName email avatarUrl isPrimary");
+      if (!admin) {
+        return res.status(401).json({ message: "Admin no longer exists or is inactive." });
+      }
+      res.json({
+        ok: true,
+        user: {
+          username: admin.username,
+          fullName: admin.fullName || "",
+          email: admin.email || "",
+          avatarUrl: admin.avatarUrl || "",
+          role: admin.isPrimary ? "Primary Admin" : "Admin",
+          isPrimary: Boolean(admin.isPrimary),
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 /** List admins (no passwords) — requires signed-in admin */
 router.get("/admin/users", requireAdmin, async (_req, res, next) => {

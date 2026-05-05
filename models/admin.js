@@ -28,6 +28,12 @@ const adminSchema = new Schema(
       default: "",
       maxlength: 120,
     },
+    avatarUrl: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 500,
+    },
     active: {
       type: Boolean,
       default: true,
