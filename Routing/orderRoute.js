@@ -1,13 +1,47 @@
 import { Router } from "express";
 import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
 import Order from "../models/order.js";
 import Listing from "../models/listing.js";
+import User from "../models/user.js";
 
 const router = Router();
+const USER_SESSION_COOKIE = "orakitech_session";
+
+function userJwtSecret() {
+  const secret =
+    process.env.USER_JWT_SECRET || process.env.ADMIN_JWT_SECRET || "";
+  return secret.length >= 16 ? secret : null;
+}
+
+function readSessionToken(req) {
+  const rawCookieHeader = String(req.headers.cookie || "");
+  if (!rawCookieHeader) return "";
+  const parts = rawCookieHeader.split(";").map((item) => item.trim());
+  const cookieName = `${USER_SESSION_COOKIE}=`;
+  const hit = parts.find((entry) => entry.startsWith(cookieName));
+  if (!hit) return "";
+  return decodeURIComponent(hit.slice(cookieName.length));
+}
+
+async function resolveSessionUser(req) {
+  const secret = userJwtSecret();
+  if (!secret) return null;
+  const token = readSessionToken(req);
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, secret);
+    const user = await User.findById(payload?.id).select("name email phone");
+    return user || null;
+  } catch {
+    return null;
+  }
+}
 
 /** Mounted at app.use("/api/orders", router) — paths are relative to /api/orders */
 router.post("/", async (req, res, next) => {
   try {
+    const sessionUser = await resolveSessionUser(req);
     const { items, source, paymentMethod, customer } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "Order must include items." });
@@ -70,6 +104,7 @@ router.post("/", async (req, res, next) => {
     }
 
     const order = new Order({
+      userId: sessionUser?._id || null,
       items: lineItems,
       source,
       totalUSD,
@@ -87,6 +122,35 @@ router.get("/", async (_req, res, next) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 }).limit(200);
     res.json(orders);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/my", async (req, res, next) => {
+  try {
+    const user = await resolveSessionUser(req);
+    if (!user) {
+      return res.status(401).json({ message: "No active user session." });
+    }
+    const email = String(user.email || "").trim().toLowerCase();
+    const orders = await Order.find({
+      $or: [
+        { userId: user._id },
+        { "customer.email": { $regex: `^${email}$`, $options: "i" } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.json({
+      user: {
+        id: String(user._id),
+        name: user.name || "",
+        email: user.email || "",
+        phone: user.phone || "",
+      },
+      orders,
+    });
   } catch (err) {
     next(err);
   }

@@ -14,6 +14,7 @@ const orderItemSchema = new Schema(
 
 const orderSchema = new Schema(
   {
+    userId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     items: { type: [orderItemSchema], required: true },
     source: {
       type: String,
