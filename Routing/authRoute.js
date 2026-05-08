@@ -65,10 +65,11 @@ function sanitizeUser(doc) {
 }
 
 function userCookieOptions() {
+  const isProd = process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
     maxAge: USER_SESSION_TTL_MS,
   };
 }
