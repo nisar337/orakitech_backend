@@ -270,6 +270,104 @@ router.put("/user/update-profile", async (req, res, next) => {
   }
 });
 
+/** GET /api/auth/user/addresses — list saved addresses */
+router.get("/user/addresses", async (req, res, next) => {
+  try {
+    const currentUser = await resolveSessionUser(req);
+    if (!currentUser) return res.status(401).json({ message: "No active session." });
+    const user = await User.findById(currentUser._id).select("addresses");
+    if (!user) return res.status(404).json({ message: "User not found." });
+    res.json({ addresses: user.addresses || [] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/auth/user/addresses — add a new address (max 10) */
+router.post("/user/addresses", async (req, res, next) => {
+  try {
+    const currentUser = await resolveSessionUser(req);
+    if (!currentUser) return res.status(401).json({ message: "No active session." });
+    const user = await User.findById(currentUser._id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.addresses.length >= 10) {
+      return res.status(400).json({ message: "Maximum of 10 addresses allowed." });
+    }
+    const { label, fullName, phone, address, city, country, isDefault } = req.body;
+    if (!String(address || "").trim() || !String(city || "").trim() || !String(country || "").trim()) {
+      return res.status(400).json({ message: "Address, city and country are required." });
+    }
+    if (isDefault) {
+      user.addresses.forEach((a) => { a.isDefault = false; });
+    }
+    const newAddr = {
+      label: String(label || "Home").trim().slice(0, 40),
+      fullName: String(fullName || "").trim().slice(0, 120),
+      phone: String(phone || "").trim().slice(0, 32),
+      address: String(address || "").trim().slice(0, 300),
+      city: String(city || "").trim().slice(0, 100),
+      country: String(country || "").trim().slice(0, 100),
+      isDefault: Boolean(isDefault) || user.addresses.length === 0,
+    };
+    user.addresses.push(newAddr);
+    await user.save();
+    res.status(201).json({ addresses: user.addresses });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PUT /api/auth/user/addresses/:addrId — update an existing address */
+router.put("/user/addresses/:addrId", async (req, res, next) => {
+  try {
+    const currentUser = await resolveSessionUser(req);
+    if (!currentUser) return res.status(401).json({ message: "No active session." });
+    const user = await User.findById(currentUser._id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    const addr = user.addresses.id(req.params.addrId);
+    if (!addr) return res.status(404).json({ message: "Address not found." });
+    const { label, fullName, phone, address, city, country, isDefault } = req.body;
+    if (!String(address || "").trim() || !String(city || "").trim() || !String(country || "").trim()) {
+      return res.status(400).json({ message: "Address, city and country are required." });
+    }
+    if (isDefault) {
+      user.addresses.forEach((a) => { a.isDefault = false; });
+    }
+    addr.label = String(label || addr.label).trim().slice(0, 40);
+    addr.fullName = String(fullName ?? addr.fullName).trim().slice(0, 120);
+    addr.phone = String(phone ?? addr.phone).trim().slice(0, 32);
+    addr.address = String(address || "").trim().slice(0, 300);
+    addr.city = String(city || "").trim().slice(0, 100);
+    addr.country = String(country || "").trim().slice(0, 100);
+    addr.isDefault = Boolean(isDefault);
+    await user.save();
+    res.json({ addresses: user.addresses });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** DELETE /api/auth/user/addresses/:addrId — remove an address */
+router.delete("/user/addresses/:addrId", async (req, res, next) => {
+  try {
+    const currentUser = await resolveSessionUser(req);
+    if (!currentUser) return res.status(401).json({ message: "No active session." });
+    const user = await User.findById(currentUser._id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    const addr = user.addresses.id(req.params.addrId);
+    if (!addr) return res.status(404).json({ message: "Address not found." });
+    const wasDefault = addr.isDefault;
+    addr.deleteOne();
+    if (wasDefault && user.addresses.length > 0) {
+      user.addresses[0].isDefault = true;
+    }
+    await user.save();
+    res.json({ addresses: user.addresses });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** Public: whether the first admin must be created via POST /admin/setup */
 router.get("/admin/status", async (_req, res, next) => {
   try {

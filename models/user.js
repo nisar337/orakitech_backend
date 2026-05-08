@@ -1,5 +1,18 @@
 import mongoose from "mongoose";
 
+const addressSchema = new mongoose.Schema(
+  {
+    label: { type: String, trim: true, maxlength: 40, default: "Home" },
+    fullName: { type: String, trim: true, maxlength: 120, default: "" },
+    phone: { type: String, trim: true, maxlength: 32, default: "" },
+    address: { type: String, trim: true, maxlength: 300, default: "" },
+    city: { type: String, trim: true, maxlength: 100, default: "" },
+    country: { type: String, trim: true, maxlength: 100, default: "" },
+    isDefault: { type: Boolean, default: false },
+  },
+  { _id: true }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -31,6 +44,10 @@ const userSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
       default: null,
+    },
+    addresses: {
+      type: [addressSchema],
+      default: [],
     },
   },
   { timestamps: true }

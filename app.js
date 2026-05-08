@@ -23,6 +23,7 @@ import listingRoute from "./Routing/listingRoute.js";
 import orderRoute from "./Routing/orderRoute.js";
 import authRoute from "./Routing/authRoute.js";
 import engagementRoute from "./Routing/engagementRoute.js";
+import aboutRoute from "./Routing/aboutRoute.js";
 
 const app = express();
 import cors from "cors";
@@ -71,6 +72,7 @@ app.use("/api/home", homeRoute);
 app.use("/api/listings", listingRoute);
 app.use("/api/orders", orderRoute);
 app.use("/api/engagement", engagementRoute);
+app.use("/api/about", aboutRoute);
 
 
 app.use((err, req, res, next) => {
