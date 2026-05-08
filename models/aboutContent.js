@@ -24,6 +24,20 @@ const aboutContentSchema = new mongoose.Schema(
     },
     ctaTitle: { type: String, default: "Want to work with us?" },
     ctaDescription: { type: String, default: "Let's build something amazing together. Reach out to us today." },
+    socialLinks: {
+      type: [
+        {
+          name: { type: String, default: "" },
+          url: { type: String, default: "" },
+        },
+      ],
+      default: [
+        { name: "Facebook", url: "#" },
+        { name: "LinkedIn", url: "#" },
+        { name: "Twitter", url: "#" },
+        { name: "WhatsApp", url: "#" },
+      ],
+    },
   },
   { timestamps: true }
 );

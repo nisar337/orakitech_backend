@@ -37,6 +37,7 @@ router.put("/", async (req, res, next) => {
       features,
       ctaTitle,
       ctaDescription,
+      socialLinks,
     } = req.body;
 
     const content = await AboutContent.getSingleton();
@@ -51,6 +52,7 @@ router.put("/", async (req, res, next) => {
     if (features !== undefined) content.features = features;
     if (ctaTitle !== undefined) content.ctaTitle = ctaTitle;
     if (ctaDescription !== undefined) content.ctaDescription = ctaDescription;
+    if (socialLinks !== undefined) content.socialLinks = socialLinks;
 
     await content.save();
     res.json(content);
