@@ -52,7 +52,6 @@ const listingSchema = new Schema(
     category: {
       type: String,
       required: true,
-      enum: ["Normal", "Moderate", "Gaming", "High Performance"],
     },
     type: {
       type: String,
