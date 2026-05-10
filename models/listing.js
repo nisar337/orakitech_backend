@@ -17,15 +17,15 @@ const listingSchema = new Schema(
     },
     ram: {
       type: String,
-      required: true,
+      default: "",
     },
     disk: {
       type: String,
-      required: true,
+      default: "",
     },
     storage: {
       type: String,
-      required: true,
+      default: "",
     },
     description: {
       type: String,
@@ -50,6 +50,10 @@ const listingSchema = new Schema(
       required: true,
     },
     category: {
+      type: String,
+      required: true,
+    },
+    subCategory: {
       type: String,
       required: true,
     },

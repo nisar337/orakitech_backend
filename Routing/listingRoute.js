@@ -15,7 +15,7 @@ const upload = multer({
 
 const DEFAULT_IMAGE =
   "https://images.pexels.com/photos/18105/pexels-photo.jpg";
-const VALID_CATEGORIES = ["Normal", "Moderate", "Gaming", "High Performance"];
+const VALID_CATEGORIES = ["New Laptop", "Used Laptop", "Accessories", "External Hardrive"];
 const VALID_STOCK_STATUSES = ["In stock", "Out of stock"];
 
 function listingImageUrls(files) {
@@ -107,6 +107,7 @@ router.post(
         price,
         quantity,
         category,
+        subCategory,
         type,
         stockStatus,
         specs: specsRaw,
@@ -151,6 +152,7 @@ router.post(
         price: priceNum,
         quantity: safeQty,
         category: String(category).trim(),
+        subCategory: String(subCategory || "").trim(),
         type: String(type || "").trim(),
         stockStatus: stockStatus ? String(stockStatus).trim() : "In stock",
         images,
@@ -199,6 +201,7 @@ router.put(
         price,
         quantity,
         category,
+        subCategory,
         type,
         stockStatus,
         existingImages,
@@ -245,6 +248,7 @@ router.put(
       doc.price = Number.isFinite(priceNum) ? priceNum : doc.price;
       doc.quantity = safeQty;
       doc.category = category ? String(category).trim() : doc.category;
+      doc.subCategory = subCategory ? String(subCategory).trim() : doc.subCategory;
       doc.type = String(type ?? doc.type).trim();
       doc.stockStatus = stockStatus
         ? String(stockStatus).trim()
