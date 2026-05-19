@@ -64,8 +64,10 @@ function sanitizeUser(doc) {
   };
 }
 
-function userCookieOptions() {
-  const isProd = process.env.NODE_ENV === "production";
+function userCookieOptions(req) {
+  // On Render and other platforms, NODE_ENV might not be set. Detect from X-Forwarded-Proto header.
+  const isHttps = req?.headers?.["x-forwarded-proto"] === "https" || process.env.NODE_ENV === "production";
+  const isProd = isHttps || process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
     sameSite: isProd ? "none" : "lax",
@@ -141,7 +143,7 @@ router.post("/user/register", async (req, res, next) => {
     const token = jwt.sign({ id: String(user._id), role: "user" }, secret, {
       expiresIn: "7d",
     });
-    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions());
+    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions(req));
     res.status(201).json({ ok: true, user: sanitizeUser(user) });
   } catch (err) {
     if (err.code === 11000) {
@@ -179,7 +181,7 @@ router.post("/user/login", async (req, res, next) => {
     const token = jwt.sign({ id: String(user._id), role: "user" }, secret, {
       expiresIn: "7d",
     });
-    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions());
+    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions(req));
     res.json({ ok: true, user: sanitizeUser(user) });
   } catch (err) {
     next(err);
@@ -187,7 +189,7 @@ router.post("/user/login", async (req, res, next) => {
 });
 
 router.post("/user/logout", (_req, res) => {
-  res.clearCookie(USER_SESSION_COOKIE, userCookieOptions());
+  res.clearCookie(USER_SESSION_COOKIE, userCookieOptions(_req));
   res.json({ ok: true });
 });
 
@@ -260,7 +262,7 @@ router.put("/user/update-profile", async (req, res, next) => {
     const token = jwt.sign({ id: String(user._id), role: "user" }, secret, {
       expiresIn: "7d",
     });
-    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions());
+    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions(req));
     res.json({ ok: true, user: sanitizeUser(user), message: "Profile updated successfully." });
   } catch (err) {
     if (err.code === 11000) {
