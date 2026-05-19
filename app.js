@@ -18,6 +18,7 @@ if (dnsServers?.length) {
 
 import express from "express";
 import mongoose from "mongoose";
+import helmet from "helmet";
 import homeRoute from "./Routing/homeRoute.js";
 import listingRoute from "./Routing/listingRoute.js";
 import orderRoute from "./Routing/orderRoute.js";
@@ -40,6 +41,7 @@ const corsOrigins = process.env.FRONTEND_ORIGIN
   : null;
 
 app.use(express.json());
+app.use(helmet());
 app.use(
   cors({
     origin:
