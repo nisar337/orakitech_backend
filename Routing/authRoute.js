@@ -57,7 +57,7 @@ router.post("/register-request", async (req, res, next) => {
     await TemporaryUser.findOneAndUpdate(
       { email },
       { $set: tempPayload },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
     );
 
     await sendOtpEmail({
@@ -875,7 +875,7 @@ router.post(
       const admin = await Admin.findOneAndUpdate(
         { username: req.admin.sub, active: true },
         { $set: { avatarUrl: fileUrl } },
-        { new: true }
+        { returnDocument: "after" }
       ).select("username fullName email avatarUrl isPrimary");
       if (!admin) {
         return res.status(401).json({ message: "Admin no longer exists or is inactive." });
