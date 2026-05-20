@@ -42,11 +42,52 @@ export async function sendOtpEmail({ to, otpCode, name, subject }) {
     </div>
   `;
 
+  const brevoKey = process.env.BREVO_API_KEY;
+  if (brevoKey) {
+    await sendBrevoEmail({
+      apiKey: brevoKey,
+      to,
+      subject: subject || "Your OTP code",
+      html,
+    });
+    return;
+  }
+
   const transporter = getMailer();
   try {
     await transporter.sendMail({ from, to, subject: subject || "Your OTP code", html });
   } catch (err) {
     console.error("SMTP sendMail failed:", err);
     throw err;
+  }
+}
+
+async function sendBrevoEmail({ apiKey, to, subject, html }) {
+  const fromEmail =
+    process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER;
+  if (!fromEmail) {
+    throw new Error("SMTP_FROM (or BREVO_FROM) must be set in the server environment.");
+  }
+  const senderName = process.env.BREVO_FROM_NAME || "OrakiTech";
+
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "api-key": apiKey,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: senderName, email: fromEmail },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error("Brevo sendMail failed:", res.status, text);
+    throw new Error(text || "Brevo sendMail failed.");
   }
 }
