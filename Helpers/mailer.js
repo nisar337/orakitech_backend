@@ -43,5 +43,10 @@ export async function sendOtpEmail({ to, otpCode, name, subject }) {
   `;
 
   const transporter = getMailer();
-  await transporter.sendMail({ from, to, subject: subject || "Your OTP code", html });
+  try {
+    await transporter.sendMail({ from, to, subject: subject || "Your OTP code", html });
+  } catch (err) {
+    console.error("SMTP sendMail failed:", err);
+    throw err;
+  }
 }
