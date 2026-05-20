@@ -7,7 +7,7 @@ router.get("/", async (_req, res, next) => {
     try {
         const laptopData = await Listing.find()
             .sort({ createdAt: -1 })
-            .select("title slug brand price category type images")
+            .select("title slug brand price category subCategory type images")
             .lean();
         res.send(laptopData);
     } catch (err) {

@@ -87,6 +87,12 @@ router.post("/", async (req, res, next) => {
           .status(400)
           .json({ message: `Product not found: ${listingId}` });
       }
+      const available = Math.max(0, Number(list.quantity) || 0);
+      if (available < q) {
+        return res.status(400).json({
+          message: `Only ${available} left in stock for ${list.title}.`,
+        });
+      }
       const unit = Number(list.price);
       if (!Number.isFinite(unit) || unit < 0) {
         return res.status(400).json({ message: "Invalid product price." });
@@ -112,6 +118,16 @@ router.post("/", async (req, res, next) => {
       customer: safeCustomer,
     });
     await order.save();
+
+    await Promise.all(
+      lineItems.map(async (line) => {
+        const listing = await Listing.findById(line.listingId);
+        if (!listing) return;
+        listing.quantity = Math.max(0, Number(listing.quantity) - line.quantity);
+        listing.stockStatus = listing.quantity > 0 ? "In stock" : "Out of stock";
+        await listing.save();
+      })
+    );
     res.status(201).json(order);
   } catch (err) {
     next(err);

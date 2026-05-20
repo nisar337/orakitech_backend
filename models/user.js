@@ -41,6 +41,30 @@ const userSchema = new mongoose.Schema(
       required: true,
       select: false,
     },
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+    resetOtpHash: {
+      type: String,
+      select: false,
+    },
+    resetOtpExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    resetOtpRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    resetOtpSendCount: {
+      type: Number,
+      default: 0,
+    },
+    resetOtpWindowStart: {
+      type: Date,
+      default: null,
+    },
     lastLoginAt: {
       type: Date,
       default: null,

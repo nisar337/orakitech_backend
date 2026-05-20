@@ -59,7 +59,7 @@ const listingSchema = new Schema(
     },
     type: {
       type: String,
-      required: true,
+      default: "",
     },
     quantity: {
       type: Number,

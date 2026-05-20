@@ -5,9 +5,11 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import Admin from "../models/admin.js";
 import User from "../models/user.js";
+import TemporaryUser from "../models/tempUser.js";
 import Order from "../models/order.js";
 import { requireAdmin } from "../middleware/requireAdmin.js";
 import { storage } from "../cloudConfig.js";
+import { sendOtpEmail } from "../Helpers/mailer.js";
 
 const router = Router();
 
@@ -15,8 +17,343 @@ const uploadAvatar = multer({
   storage,
   limits: { fileSize: 4 * 1024 * 1024, files: 1 },
 });
+
+router.post("/register-request", async (req, res, next) => {
+  try {
+    const name = normalizeName(req.body?.name);
+    const email = normalizeEmail(req.body?.email);
+    const phone = normalizePhone(req.body?.phone);
+    const password = String(req.body?.password || "");
+
+    if (name.length < 2) {
+      return res.status(400).json({ message: "Name must be at least 2 characters." });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: "Provide a valid email address." });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters." });
+    }
+
+    const existing = await User.findOne({ email }).select("_id");
+    if (existing) {
+      return res.status(409).json({ message: "Email is already registered." });
+    }
+
+    const otpCode = generateOtpCode();
+    const otpHash = await bcrypt.hash(otpCode, 10);
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const tempPayload = {
+      name,
+      email,
+      phone,
+      passwordHash,
+      otpHash,
+      otpExpiresAt: registerOtpExpiresAt(),
+      attemptCount: 0,
+    };
+
+    await TemporaryUser.findOneAndUpdate(
+      { email },
+      { $set: tempPayload },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await sendOtpEmail({
+      to: email,
+      otpCode,
+      name,
+      subject: "Verify your OrakiTech account",
+    });
+
+    res.json({ ok: true, message: "OTP sent to email.", email });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/admin/me/password", requireAdmin, async (req, res, next) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!currentPassword) {
+      return res.status(400).json({ message: "Current password is required." });
+    }
+    if (newPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ message: "New password must be at least 8 characters." });
+    }
+
+    const admin = await Admin.findOne({
+      username: req.admin.sub,
+      active: true,
+    }).select("+passwordHash");
+
+    if (!admin || !admin.passwordHash) {
+      return res.status(401).json({ message: "Admin no longer exists or is inactive." });
+    }
+
+    const match = await bcrypt.compare(currentPassword, admin.passwordHash);
+    if (!match) {
+      return res.status(401).json({ message: "Current password is incorrect." });
+    }
+
+    admin.passwordHash = await bcrypt.hash(newPassword, 10);
+    await admin.save();
+
+    res.json({ ok: true, message: "Password updated successfully." });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/verify-registration", async (req, res, next) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const otp = String(req.body?.otp || "").trim();
+
+    if (!email || otp.length !== 6) {
+      return res.status(400).json({ message: "Email and 6-digit OTP are required." });
+    }
+
+    const tempUser = await TemporaryUser.findOne({ email }).select(
+      "+otpHash +passwordHash"
+    );
+    if (!tempUser) {
+      return res.status(404).json({ message: "No pending registration found." });
+    }
+
+    if (tempUser.otpExpiresAt < new Date()) {
+      await TemporaryUser.deleteOne({ _id: tempUser._id });
+      return res.status(410).json({ message: "OTP expired. Please request a new code." });
+    }
+
+    const validOtp = await bcrypt.compare(otp, tempUser.otpHash);
+    if (!validOtp) {
+      tempUser.attemptCount += 1;
+      await tempUser.save();
+      return res.status(401).json({ message: "Invalid OTP code." });
+    }
+
+    const existing = await User.findOne({ email }).select("_id");
+    if (existing) {
+      await TemporaryUser.deleteOne({ _id: tempUser._id });
+      return res.status(409).json({ message: "Email is already registered." });
+    }
+
+    const secret = userJwtSecret();
+    if (!secret) {
+      return res.status(500).json({
+        message:
+          "USER_JWT_SECRET must be set in the server environment (min 16 characters).",
+      });
+    }
+
+    const user = await User.create({
+      name: tempUser.name,
+      email: tempUser.email,
+      phone: tempUser.phone,
+      passwordHash: tempUser.passwordHash,
+      verified: true,
+    });
+
+    await TemporaryUser.deleteOne({ _id: tempUser._id });
+
+    const token = jwt.sign({ id: String(user._id), role: "user" }, secret, {
+      expiresIn: "7d",
+    });
+    res.cookie(USER_SESSION_COOKIE, token, userCookieOptions(req));
+    res.status(201).json({ ok: true, user: sanitizeUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/resend-register-otp", async (req, res, next) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) {
+      return res.status(400).json({ message: "Email is required." });
+    }
+
+    const tempUser = await TemporaryUser.findOne({ email }).select(
+      "+otpHash +passwordHash"
+    );
+    if (!tempUser) {
+      return res.status(404).json({ message: "No pending registration found." });
+    }
+
+    if (tempUser.attemptCount >= REGISTER_OTP_MAX_SENDS) {
+      return res.status(429).json({ message: "Too many OTP attempts. Try again later." });
+    }
+
+    const otpCode = generateOtpCode();
+    tempUser.otpHash = await bcrypt.hash(otpCode, 10);
+    tempUser.otpExpiresAt = registerOtpExpiresAt();
+    tempUser.attemptCount += 1;
+    await tempUser.save();
+
+    await sendOtpEmail({
+      to: email,
+      otpCode,
+      name: tempUser.name,
+      subject: "Verify your OrakiTech account",
+    });
+
+    res.json({ ok: true, message: "OTP resent." });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/forgot-password", async (req, res, next) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) {
+      return res.status(400).json({ message: "Email is required." });
+    }
+
+    const user = await User.findOne({ email }).select(
+      "+resetOtpHash +resetOtpRequestedAt +resetOtpSendCount +resetOtpWindowStart"
+    );
+    if (!user) {
+      return res.status(404).json({ message: "Email not found." });
+    }
+
+    const now = new Date();
+    if (user.resetOtpRequestedAt && now - user.resetOtpRequestedAt < RESET_OTP_RESEND_COOLDOWN_MS) {
+      return res.status(429).json({ message: "Please wait before requesting another OTP." });
+    }
+
+    if (!user.resetOtpWindowStart || now - user.resetOtpWindowStart > RESET_OTP_WINDOW_MS) {
+      user.resetOtpWindowStart = now;
+      user.resetOtpSendCount = 0;
+    }
+
+    if (user.resetOtpSendCount >= RESET_OTP_MAX_SENDS) {
+      return res.status(429).json({ message: "Too many OTP requests. Try again later." });
+    }
+
+    const otpCode = generateOtpCode();
+    user.resetOtpHash = await bcrypt.hash(otpCode, 10);
+    user.resetOtpExpiresAt = resetOtpExpiresAt();
+    user.resetOtpRequestedAt = now;
+    user.resetOtpSendCount += 1;
+    await user.save();
+
+    await sendOtpEmail({
+      to: email,
+      otpCode,
+      name: user.name,
+      subject: "Reset your OrakiTech password",
+    });
+
+    res.json({ ok: true, message: "OTP sent to email." });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/verify-otp", async (req, res, next) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const otp = String(req.body?.otp || "").trim();
+
+    if (!email || otp.length !== 6) {
+      return res.status(400).json({ message: "Email and 6-digit OTP are required." });
+    }
+
+    const user = await User.findOne({ email }).select("+resetOtpHash");
+    if (!user || !user.resetOtpHash) {
+      return res.status(404).json({ message: "No reset request found." });
+    }
+
+    if (!user.resetOtpExpiresAt || user.resetOtpExpiresAt < new Date()) {
+      user.resetOtpHash = undefined;
+      user.resetOtpExpiresAt = null;
+      await user.save();
+      return res.status(410).json({ message: "OTP expired. Request a new one." });
+    }
+
+    const validOtp = await bcrypt.compare(otp, user.resetOtpHash);
+    if (!validOtp) {
+      return res.status(401).json({ message: "Invalid OTP code." });
+    }
+
+    const secret = userJwtSecret();
+    if (!secret) {
+      return res.status(500).json({ message: "USER_JWT_SECRET must be set." });
+    }
+
+    const token = jwt.sign({ id: String(user._id), email }, secret, {
+      expiresIn: RESET_TOKEN_TTL,
+    });
+
+    res.json({ ok: true, token });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/reset-password", async (req, res, next) => {
+  try {
+    const auth = String(req.headers.authorization || "");
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!token) {
+      return res.status(401).json({ message: "Authorization token required." });
+    }
+
+    const secret = userJwtSecret();
+    if (!secret) {
+      return res.status(500).json({ message: "USER_JWT_SECRET must be set." });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(token, secret);
+    } catch {
+      return res.status(401).json({ message: "Reset token expired or invalid." });
+    }
+
+    const newPassword = String(req.body?.password || "");
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters." });
+    }
+
+    const user = await User.findById(payload?.id).select("+passwordHash +resetOtpHash");
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.resetOtpHash = undefined;
+    user.resetOtpExpiresAt = null;
+    user.resetOtpRequestedAt = null;
+    user.resetOtpSendCount = 0;
+    user.resetOtpWindowStart = null;
+    await user.save();
+
+    const sessionToken = jwt.sign({ id: String(user._id), role: "user" }, secret, {
+      expiresIn: "7d",
+    });
+    res.cookie(USER_SESSION_COOKIE, sessionToken, userCookieOptions(req));
+    res.json({ ok: true, message: "Password updated successfully.", user: sanitizeUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
 const USER_SESSION_COOKIE = "orakitech_session";
 const USER_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RESET_OTP_TTL_MS = 5 * 60 * 1000;
+const RESET_TOKEN_TTL = "10m";
+const RESET_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const RESET_OTP_WINDOW_MS = 60 * 60 * 1000;
+const RESET_OTP_MAX_SENDS = 5;
+const REGISTER_OTP_TTL_MS = 5 * 60 * 1000;
+const REGISTER_OTP_MAX_SENDS = 5;
 
 function jwtSecret() {
   const secret = process.env.ADMIN_JWT_SECRET;
@@ -53,6 +390,18 @@ function normalizeEmail(v) {
 function normalizePhone(v) {
   const digits = String(v || "").replace(/\D/g, "").slice(0, 10);
   return digits ? `+92${digits}` : "";
+}
+
+function generateOtpCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function resetOtpExpiresAt() {
+  return new Date(Date.now() + RESET_OTP_TTL_MS);
+}
+
+function registerOtpExpiresAt() {
+  return new Date(Date.now() + REGISTER_OTP_TTL_MS);
 }
 
 function sanitizeUser(doc) {
@@ -609,6 +958,24 @@ router.get("/admin/customers", requireAdmin, async (_req, res, next) => {
     );
 
     res.json({ customers, serverTime: new Date(now).toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Delete a customer account (admin only). */
+router.delete("/admin/customers/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid id." });
+    }
+    const user = await User.findById(id).select("_id email");
+    if (!user) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
+    await User.findByIdAndDelete(id);
+    res.json({ ok: true, id: String(user._id) });
   } catch (err) {
     next(err);
   }
